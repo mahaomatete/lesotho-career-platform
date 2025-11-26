@@ -115,3 +115,4 @@ if (firebaseApp) {
 }
 
 module.exports = { admin: firebaseApp, db, auth };
+
