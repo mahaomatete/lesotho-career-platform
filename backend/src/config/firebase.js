@@ -6,64 +6,76 @@ const initializeFirebase = () => {
   try {
     console.log('🔧 Initializing Firebase...');
 
-    // Method 1: Try using the service account file first
-    const serviceAccountPath = path.join(__dirname, '..', '..', 'firebase-service-account.json');
-    
-    if (fs.existsSync(serviceAccountPath)) {
-      console.log('📁 Using service account file for Firebase configuration');
-      
+    let serviceAccount;
+
+    // --- METHOD 1: Use Environment Variable (CRITICAL FOR RENDER) ---
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+      console.log('☁️ Using SERVICE ACCOUNT KEY from Environment Variable for Firebase configuration');
       try {
-        const serviceAccount = require(serviceAccountPath);
-        
-        // Validate the service account
-        if (!serviceAccount.private_key || !serviceAccount.client_email) {
-          throw new Error('Service account file is missing required fields');
-        }
-
-        // Fix private key formatting if needed
-        let privateKey = serviceAccount.private_key;
-        if (privateKey.includes('\\n')) {
-          privateKey = privateKey.replace(/\\n/g, '\n');
-        }
-
-        const config = {
-          credential: admin.credential.cert({
-            ...serviceAccount,
-            private_key: privateKey
-          }),
-          databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`,
-          storageBucket: `${serviceAccount.project_id}.appspot.com`
-        };
-
-        if (admin.apps.length === 0) {
-          admin.initializeApp(config);
-          console.log('✅ Firebase Admin initialized with service account file');
-        }
-        
-        console.log(`📁 Project: ${serviceAccount.project_id}`);
-        console.log(`📧 Service Account: ${serviceAccount.client_email}`);
-        return admin;
-      } catch (fileError) {
-        console.error('❌ Error reading service account file:', fileError.message);
-        throw fileError;
+        // Parse the JSON string from the environment variable
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      } catch (e) {
+        console.error('❌ Error parsing FIREBASE_SERVICE_ACCOUNT_KEY JSON:', e.message);
+        throw new Error('Invalid Firebase Service Account JSON provided via environment variable.');
       }
-    } else {
-      console.log('❌ Service account file not found at:', serviceAccountPath);
-      throw new Error('Firebase service account file not found');
+    } 
+    // --- METHOD 2: Fallback to Local File (for local development) ---
+    else {
+      const serviceAccountPath = path.join(__dirname, '..', '..', 'firebase-service-account.json');
+      
+      if (fs.existsSync(serviceAccountPath)) {
+        console.log('📁 Using local service account file for Firebase configuration');
+        try {
+          // Note: Using require() on a json file works best for local files
+          serviceAccount = require(serviceAccountPath); 
+        } catch (fileError) {
+          console.error('❌ Error reading local service account file:', fileError.message);
+          throw fileError;
+        }
+      } else {
+        console.log('❌ Service account file not found at:', serviceAccountPath);
+        throw new Error('Firebase service account file not found or FIREBASE_SERVICE_ACCOUNT_KEY environment variable not set.');
+      }
     }
+
+    // --- Common Initialization Logic ---
+    
+    // Validate the service account (basic check)
+    if (!serviceAccount || !serviceAccount.private_key || !serviceAccount.client_email) {
+      throw new Error('Service account object is missing required fields (private_key or client_email).');
+    }
+
+    // Fix private key formatting (important if copied as a single line JSON string)
+    let privateKey = serviceAccount.private_key;
+    if (privateKey.includes('\\n')) {
+      privateKey = privateKey.replace(/\\n/g, '\n');
+    }
+
+    const config = {
+      credential: admin.credential.cert({
+        ...serviceAccount,
+        private_key: privateKey
+      }),
+      // Use FIREBASE_DATABASE_URL from environment variable if available
+      databaseURL: process.env.FIREBASE_DATABASE_URL || `https://${serviceAccount.project_id}.firebaseio.com`,
+      storageBucket: `${serviceAccount.project_id}.appspot.com`
+    };
+
+    if (admin.apps.length === 0) {
+      admin.initializeApp(config);
+      console.log('✅ Firebase Admin initialized successfully.');
+    }
+    
+    console.log(`📁 Project: ${serviceAccount.project_id || 'Unknown'}`);
+    console.log(`📧 Service Account: ${serviceAccount.client_email || 'Unknown'}`);
+    return admin;
 
   } catch (error) {
     console.error('❌ Firebase Admin initialization failed:', error.message);
     
-    // Provide detailed troubleshooting information
     console.log('\n🔧 Firebase Troubleshooting Guide:');
-    console.log('1. Download a new service account key:');
-    console.log('   - Go to Firebase Console → Project Settings → Service Accounts');
-    console.log('   - Click "Generate New Private Key"');
-    console.log('   - Save as firebase-service-account.json in backend folder');
-    console.log('2. Verify your Firebase project is active and billing is enabled');
-    console.log('3. Check if the service account has proper permissions');
-    console.log('4. Ensure your system clock is synchronized');
+    console.log('1. For Render: Ensure FIREBASE_SERVICE_ACCOUNT_KEY is set and contains the full JSON string.');
+    console.log('2. For Local: Ensure firebase-service-account.json is present.');
     
     return null;
   }
