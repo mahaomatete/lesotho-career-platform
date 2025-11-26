@@ -20,14 +20,55 @@ const cleanupApplications = require('./scripts/cleanupApplications');
 
 const app = express();
 
+// --- START: MODIFIED CORS CONFIGURATION ---
+
+// CRITICAL: Get the frontend URL from the environment (will be your Vercel URL)
+const CLIENT_URL = process.env.CLIENT_URL;
+
+// Get the backend's own URL from Render environment (for health checks/pings)
+const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL;
+
+const allowedOrigins = [
+  'http://localhost:3000', // For local development
+];
+
+if (CLIENT_URL) {
+  // Add the Vercel production URL
+  allowedOrigins.push(CLIENT_URL);
+  // Also add common Vercel preview domains if they use a custom format (optional but safer)
+  // Example if your Vercel URL is https://my-app.vercel.app, you might add:
+  // allowedOrigins.push(new RegExp(`https://.*\.vercel\.app$`)); 
+}
+
+if (RENDER_EXTERNAL_URL) {
+  // Allow Render's own URL for internal health checks/pings
+  allowedOrigins.push(RENDER_EXTERNAL_URL); 
+}
+
 // Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
+
+// Apply the dynamic CORS configuration
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, cURL, or server-to-server)
+    if (!origin) return callback(null, true); 
+    
+    // Check if the origin is in the allowed list
+    if (allowedOrigins.includes(origin) || allowedOrigins.find(url => origin.startsWith(url))) {
+      callback(null, true);
+    } else {
+      console.log(`🚫 CORS blocked request from origin: ${origin}`);
+      callback(new Error(`Not allowed by CORS: ${origin}`), false);
+    }
+  },
   credentials: true
 }));
+
+// --- END: MODIFIED CORS CONFIGURATION ---
+
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -115,17 +156,6 @@ app.get('/api/health', async (req, res) => {
     });
   }
 });
-
-// Allow your Firebase hosting domain
-app.use(cors({
-  origin: [
-    'https://careerguidanceLesotho.web.app',
-    'https://careerguidanceLesotho.firebaseapp.com',
-    'http://localhost:3000'
-  ],
-  credentials: true
-}));
-
 
 
 // System info endpoint
@@ -553,6 +583,9 @@ app.use((req, res) => {
   });
 });
 
+// --- START: MODIFIED PORT LISTENING ---
+
+// CRITICAL: Use Render's PORT environment variable or fallback to 5000
 const PORT = process.env.PORT || 5000;
 
 // Initialize data and start server
@@ -615,9 +648,11 @@ const initializeServer = async () => {
       console.log('='.repeat(60));
       console.log(`📍 Server is running on port ${PORT}`);
       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`🏠 API Home: http://localhost:${PORT}/`);
-      console.log(`⚡ System Info: http://localhost:${PORT}/api/system/info`);
+      // Use RENDER_EXTERNAL_URL for the live host if available, otherwise localhost
+      const hostUrl = RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      console.log(`🔗 Health check: ${hostUrl}/api/health`);
+      console.log(`🏠 API Home: ${hostUrl}/`);
+      console.log(`⚡ System Info: ${hostUrl}/api/system/info`);
       
       console.log('\n📋 Key Endpoints:');
       console.log('   POST /api/auth/register          - Register new user');
@@ -647,10 +682,9 @@ const initializeServer = async () => {
   } catch (error) {
     console.error('\n❌ Server initialization failed:', error.message);
     console.log('\n💡 Troubleshooting tips:');
-    console.log('   1. Check if firebase-service-account.json exists in backend folder');
-    console.log('   2. Verify Firebase project configuration');
-    console.log('   3. Check internet connection');
-    console.log('   4. Ensure Firebase project exists and is active');
+    console.log('  1. For Render: Check FIREBASE_SERVICE_ACCOUNT_KEY environment variable.');
+    console.log('  2. For Local: Check if firebase-service-account.json exists.');
+    console.log('  3. Verify Firebase project configuration.');
     
     // Start server anyway but with limited functionality
     console.log('\n⚠️ Starting server in degraded mode...');
@@ -663,6 +697,9 @@ const initializeServer = async () => {
     });
   }
 };
+
+// --- END: MODIFIED PORT LISTENING ---
+
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
